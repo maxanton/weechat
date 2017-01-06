@@ -45,6 +45,8 @@
 
 #ifdef HAVE_GNUTLS
 #include <gnutls/gnutls.h>
+#include <gnutls/abstract.h>
+#include <gnutls/crypto.h>
 #include <gnutls/x509.h>
 #endif /* HAVE_GNUTLS */
 
@@ -3937,6 +3939,37 @@ irc_server_compare_fingerprints (const char *fingerprint,
 
 #ifdef HAVE_GNUTLS
 int
+weechat_fingerprint_get_spki(gnutls_x509_crt_t cert,
+                             gnutls_digest_algorithm_t algo,
+                             void *buf)
+{
+    gnutls_pubkey_t pubkey;
+
+    if (gnutls_pubkey_init(&pubkey) != 0)
+        return 1;
+
+    if (gnutls_pubkey_import_x509(pubkey, cert, 0) != 0) {
+        gnutls_pubkey_deinit(pubkey);
+        return 1;
+    }
+
+    unsigned char derkey[262144]; // Should be big enough to hold any SubjectPublicKeyInfo structure
+    size_t derkey_len = sizeof derkey;
+
+    if (gnutls_pubkey_export(pubkey, GNUTLS_X509_FMT_DER, derkey, &derkey_len) != 0) {
+        gnutls_pubkey_deinit(pubkey);
+        return 1;
+    }
+
+    gnutls_pubkey_deinit(pubkey);
+
+    if (gnutls_hash_fast(algo, derkey, derkey_len, buf) != 0)
+        return 1;
+
+    return 0;
+}
+
+int
 irc_server_check_certificate_fingerprint (struct t_irc_server *server,
                                           gnutls_x509_crt_t certificate,
                                           const char *good_fingerprints)
@@ -3973,11 +4006,10 @@ irc_server_check_certificate_fingerprint (struct t_irc_server *server,
             if (fingerprint_server[algo])
             {
                 /* calculate the fingerprint for the certificate */
-                if (gnutls_x509_crt_get_fingerprint (
+                if (weechat_fingerprint_get_spki (
                         certificate,
                         irc_fingerprint_digest_algos[algo],
-                        fingerprint_server[algo],
-                        &size_bytes) != GNUTLS_E_SUCCESS)
+                        fingerprint_server[algo]) != 0)
                 {
                     weechat_printf (
                         server->buffer,
